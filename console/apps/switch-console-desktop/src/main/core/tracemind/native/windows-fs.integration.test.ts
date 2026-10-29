@@ -12,6 +12,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { discoverPackageChecks } from '../verification/command-contract';
+import { openVerifiedWorkingDirectory } from '../verification/pinned-working-directory';
 import { scanProject, type NativeProjectFs } from './access-registry';
 
 const addonPath = join(process.cwd(), 'dist-tracemind-native', 'tracemind_fs.node');
@@ -117,6 +119,44 @@ describe.skipIf(process.platform !== 'win32' || !native)(
         ]);
       } finally {
         if (rootFd >= 0) close(rootFd);
+        closeOpenHandles();
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+    it('opens the approved working directory using native handle metadata', () => {
+      const base = mkdtempSync(join(tmpdir(), 'tracemind-win-pinned-cwd-'));
+      const root = join(base, 'project');
+      mkdirSync(join(root, 'nested'), { recursive: true });
+      let opened: { fd: number; identity: string } | undefined;
+      try {
+        const rootFd = openRoot(root);
+        const rootIdentity = native!.identity!(rootFd);
+        const nestedFd = openChild(rootFd, 'nested', true);
+        const workingDirectoryIdentity = native!.identity!(nestedFd);
+        close(nestedFd);
+        close(rootFd);
+
+        const proposal = discoverPackageChecks(
+          '{"scripts":{"test":"echo test"}}',
+          'nested',
+          'audit:fixture'
+        )[0]!;
+        opened = openVerifiedWorkingDirectory(
+          {
+            root: realpathSync(root),
+            identity: rootIdentity,
+            workingDirectoryIdentity,
+            fingerprint: 'a'.repeat(64),
+          },
+          proposal,
+          native!
+        );
+
+        expect(native!.stat!(opened.fd).directory).toBe(true);
+        expect(native!.identity!(opened.fd)).toBe(workingDirectoryIdentity);
+      } finally {
+        if (opened) close(opened.fd);
         closeOpenHandles();
         rmSync(base, { recursive: true, force: true });
       }

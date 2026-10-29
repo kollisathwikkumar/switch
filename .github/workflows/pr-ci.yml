@@ -510,10 +510,10 @@ jobs:
         shell: pwsh
         run: >-
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:PATH";
-          $whoami = (Get-Command whoami.exe -CommandType Application).Source;
+          $whoami = Get-Command whoami.exe -CommandType Application | Select-Object -First 1;
           $expectedWhoami = Join-Path $env:SystemRoot 'System32\whoami.exe';
-          Write-Output "WINDOWS_WHOAMI=$whoami";
-          if ($whoami -ne $expectedWhoami) { throw "Unexpected whoami resolution: $whoami" };
+          Write-Output "WINDOWS_WHOAMI=$($whoami.Source)";
+          if (-not $whoami -or $whoami.Source -ine $expectedWhoami) { throw "Unexpected whoami resolution: $($whoami.Source)" };
           pnpm --filter @switch-console/desktop exec vitest run --project node
           src/main/core/tracemind/native/native-loader.test.ts
           src/main/core/tracemind/native/windows-fs.integration.test.ts

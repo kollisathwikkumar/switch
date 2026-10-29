@@ -11,8 +11,11 @@ import { commandProposalSchema, type CommandProposal } from './command-contract'
 
 const identitySchema = z.string().regex(/^(?:\d{1,40}:\d{1,40}|win32:[a-f0-9]{16}:[a-f0-9]{32})$/);
 function descriptorIdentity(native: NativeProjectFs, fd: number): string {
-  const info = fstatSync(fd, { bigint: true });
-  if (!info.isDirectory()) throw new Error('Working directory is not a directory');
+  if (native.stat) {
+    if (!native.stat(fd).directory) throw new Error('Working directory is not a directory');
+  } else if (!fstatSync(fd, { bigint: true }).isDirectory()) {
+    throw new Error('Working directory is not a directory');
+  }
   return nativeFileIdentity(native, fd);
 }
 /** Returns an owned fd; callers must close it, and must retain it until the child is spawned. */
