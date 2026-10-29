@@ -346,14 +346,18 @@ jobs:
           src/main/core/tracemind/verification/process-limit.test.ts
           src/main/core/tracemind/verification/memory-limit.test.ts
 
-  # This lane reproduces Linux isolation on ARM64 rather than relying on the
-  # local Lima guest. Bubblewrap must be available, and the required cgroup
-  # tests fail explicitly when the hosted runner lacks delegated memory/pids.
+  # This lane probes actual Bubblewrap/cgroup controls in a disposable hosted
+  # ARM64 VM's privileged job container. The outer runner remains ephemeral;
+  # required isolation tests still fail closed if the kernel does not expose
+  # the needed namespace or delegated cgroup controllers.
   console-linux-arm64-isolation:
     name: TraceMind sandbox (Linux ARM64)
     needs: changes
     if: ${{ needs.changes.outputs.console == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:24.04
+      options: --privileged
     defaults:
       run:
         working-directory: console
@@ -380,7 +384,7 @@ jobs:
         run: pnpm -r --filter './packages/**' run build
 
       - name: Install Bubblewrap
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: apt-get update && apt-get install -y bubblewrap sudo
 
       - name: Assert hosted Linux ARM64 isolation prerequisites
         run: |
