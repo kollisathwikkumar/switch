@@ -452,7 +452,7 @@ jobs:
           parent="$mount/tracemind-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           init="$mount/tracemind-ci-init-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           parent_owned=0
-          init_owned=0
+          init_created=0
           root_controls=" $(cat "$mount/cgroup.subtree_control") "
           root_to_enable=()
           root_to_disable=()
@@ -467,7 +467,7 @@ jobs:
             local pid=$1
             local stat_line rest
             local -a fields
-            IFS= read -r stat_line < "/proc/$pid/stat" || return 1
+            IFS= read -r stat_line 2>/dev/null < "/proc/$pid/stat" || return 1
             rest="${stat_line##*) }"
             read -r -a fields <<< "$rest"
             printf '%s\n' "${fields[19]}"
@@ -506,9 +506,10 @@ jobs:
             if [[ "$root_changed" == 1 && ${#root_to_disable[@]} -gt 0 ]]; then
               printf '%s' "${root_to_disable[*]}" > "$mount/cgroup.subtree_control" || failed=1
             fi
-            if [[ "$init_owned" == 1 && -d "$init" ]]; then
-              move_group_processes "$init" "$mount" || failed=1
-              rmdir "$init" 2>/dev/null || failed=1
+            # Keep the original job-container processes in their holding group;
+            # the Actions container teardown removes this private hierarchy.
+            if [[ "$init_created" == 1 && -d "$init" ]]; then
+              echo "TRACE_CI_PRIVATE_HOLDING_GROUP_REMAINS_UNTIL_CONTAINER_TEARDOWN=$init"
             fi
             if [[ "$failed" == 1 ]]; then
               echo '::error::TraceMind CI cgroup cleanup or controller restoration failed.'
@@ -524,7 +525,7 @@ jobs:
             echo '::error::UNSUPPORTED: cannot create the private CI cgroup holding group.'
             exit 1
           fi
-          init_owned=1
+          init_created=1
           root_pids=''
           for _ in $(seq 1 10); do
             if ! move_group_processes "$mount" "$init"; then
