@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { probe, run } from '@microsoft/mxc-sdk/v1';
 import { expect, it } from 'vitest';
-import { buildWindowsMxcRequest } from './windows-mxc';
+import { buildWindowsMxcRequest, quoteWindowsArgv } from './windows-mxc';
 
 if (process.env.TRACEMIND_REQUIRE_WINDOWS === '1' && process.platform !== 'win32') {
   throw new Error('TRACEMIND_REQUIRE_WINDOWS=1 requires a Windows runner');
@@ -65,18 +65,33 @@ it.skipIf(process.platform !== 'win32')(
       // launch so an OS-level startup failure is distinguishable from a request
       // rejected by the installed ProcessContainer tier.
       const capability = probe(request);
+      const systemControlRequest = {
+        ...request,
+        command: quoteWindowsArgv([join(systemRoot as string, 'System32', 'where.exe'), 'cmd.exe']),
+      };
+      const systemControl = await run(systemControlRequest, { telemetry: { enabled: false } });
       const result = await run(request, { telemetry: { enabled: false } });
-      expect(result.timedOut).toBe(false);
-      expect(
-        result.exitCode,
-        JSON.stringify({
+      const diagnostic = JSON.stringify({
+        systemControl: {
+          exitCode: systemControl.exitCode,
+          timedOut: systemControl.timedOut,
+          stdout: systemControl.stdout,
+          stderr: systemControl.stderr,
+          warnings: systemControl.warnings,
+        },
+        target: {
           exitCode: result.exitCode,
+          timedOut: result.timedOut,
           stdout: result.stdout,
           stderr: result.stderr,
           warnings: result.warnings,
-          capability,
-        })
-      ).toBe(0);
+        },
+        capability,
+      });
+      expect(systemControl.exitCode, diagnostic).toBe(0);
+      expect(systemControl.stdout.toLowerCase(), diagnostic).toContain('cmd.exe');
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode, diagnostic).toBe(0);
       const resultLine = result.stdout
         .split(/\r?\n/)
         .find((line) => line.startsWith('TRACE_RESULT='));

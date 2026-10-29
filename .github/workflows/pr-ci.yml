@@ -377,14 +377,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: console/pnpm-lock.yaml
 
+      - name: Install Linux build and isolation toolchain
+        run: apt-get update && apt-get install -y build-essential bubblewrap python3 sudo
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace packages
         run: pnpm -r --filter './packages/**' run build
-
-      - name: Install Bubblewrap
-        run: apt-get update && apt-get install -y bubblewrap sudo
 
       - name: Assert hosted Linux ARM64 isolation prerequisites
         run: |
