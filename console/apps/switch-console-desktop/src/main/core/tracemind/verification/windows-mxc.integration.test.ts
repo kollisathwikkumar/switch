@@ -63,7 +63,15 @@ it.skipIf(process.platform !== 'win32')(
       });
       const result = await run(request, { telemetry: { enabled: false } });
       expect(result.timedOut).toBe(false);
-      expect(result.exitCode, result.stderr).toBe(0);
+      expect(
+        result.exitCode,
+        JSON.stringify({
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          warnings: result.warnings,
+        })
+      ).toBe(0);
       const resultLine = result.stdout
         .split(/\r?\n/)
         .find((line) => line.startsWith('TRACE_RESULT='));

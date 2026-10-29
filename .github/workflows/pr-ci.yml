@@ -507,7 +507,13 @@ jobs:
       - name: Exercise real Windows ProcessContainer write and loopback denial
         env:
           TRACEMIND_REQUIRE_WINDOWS: '1'
+        shell: pwsh
         run: >-
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:PATH";
+          $whoami = (Get-Command whoami.exe -CommandType Application).Source;
+          $expectedWhoami = Join-Path $env:SystemRoot 'System32\whoami.exe';
+          Write-Output "WINDOWS_WHOAMI=$whoami";
+          if ($whoami -ne $expectedWhoami) { throw "Unexpected whoami resolution: $whoami" };
           pnpm --filter @switch-console/desktop exec vitest run --project node
           src/main/core/tracemind/native/native-loader.test.ts
           src/main/core/tracemind/native/windows-fs.integration.test.ts
