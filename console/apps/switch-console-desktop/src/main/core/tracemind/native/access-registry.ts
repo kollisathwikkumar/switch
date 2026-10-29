@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, read as readFd, type BigIntStats } from 'node:fs';
+import { closeSync, fstatSync, read as readFd } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { isExcludedPathEntry } from '../audit/exclusions';
 import type { SkippedEntry } from '../audit/file-inventory';
@@ -12,11 +12,35 @@ export interface NativeProjectFs {
   /** Native file identity and close operations are mandatory in platform builds; optional only for legacy test fixtures. */
   identity?(fd: number): string;
   close?(fd: number): void;
+  /** Windows returns file metadata from the retained HANDLE, never from a CRT fd. */
+  stat?(fd: number): NativeProjectFileStat;
+  /** Windows reads from the retained HANDLE at an explicit offset. */
+  read?(fd: number, buffer: Buffer, offset: number, length: number, position: number): number;
+}
+
+export interface NativeProjectFileStat {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  file: boolean;
+  directory: boolean;
+}
+
+export interface ProjectFileStat {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  isFile(): boolean;
+  isDirectory(): boolean;
 }
 
 /** Async, descriptor-backed reader; it never reopens a file by its project path. */
 export interface ProjectFileHandle {
-  stat(options: { bigint: true }): Promise<BigIntStats>;
+  stat(options: { bigint: true }): Promise<ProjectFileStat>;
   read(
     buffer: Buffer,
     offset: number,
@@ -51,9 +75,30 @@ export function openProjectFileHandle(fd: number, native?: NativeProjectFs): Pro
   return {
     async stat(options) {
       ensureOpen();
+      if (native?.stat) {
+        const value = native.stat(fd);
+        return {
+          ...value,
+          isFile: () => value.file,
+          isDirectory: () => value.directory,
+        };
+      }
+      if (process.platform === 'win32')
+        throw new Error('Native Windows handle metadata is unavailable');
       return fstatSync(fd, options);
     },
     read(buffer, offset, length, position) {
+      if (native?.read) {
+        if (closed) return Promise.reject(new Error('Project file handle is closed'));
+        try {
+          const bytesRead = native.read(fd, buffer, offset, length, position);
+          return Promise.resolve({ bytesRead, buffer });
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      }
+      if (process.platform === 'win32')
+        return Promise.reject(new Error('Native Windows handle reading is unavailable'));
       return new Promise((resolve, reject) => {
         if (closed) {
           reject(new Error('Project file handle is closed'));

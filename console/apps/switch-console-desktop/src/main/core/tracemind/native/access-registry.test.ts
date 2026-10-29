@@ -205,6 +205,50 @@ describe.skipIf(!path)('descriptor-relative project scan', () => {
   });
 });
 
+describe('opaque native project file handles', () => {
+  it('uses native metadata and offset reads instead of Node CRT descriptor APIs', async () => {
+    const contents = Buffer.from('native handle bytes');
+    const closed: number[] = [];
+    const native = {
+      stat(fd: number) {
+        expect(fd).toBe(412);
+        return {
+          dev: 7n,
+          ino: 19n,
+          size: BigInt(contents.length),
+          mtimeNs: 23n,
+          ctimeNs: 29n,
+          file: true,
+          directory: false,
+        };
+      },
+      read(fd: number, buffer: Buffer, offset: number, length: number, position: number) {
+        expect(fd).toBe(412);
+        return contents.copy(
+          buffer,
+          offset,
+          position,
+          Math.min(position + length, contents.length)
+        );
+      },
+      close(fd: number) {
+        closed.push(fd);
+      },
+    } as NativeProjectFs;
+
+    const file = openProjectFileHandle(412, native);
+    const info = await file.stat({ bigint: true });
+    const output = Buffer.alloc(Number(info.size));
+    const { bytesRead } = await file.read(output, 0, output.length, 0);
+    expect(info.isFile()).toBe(true);
+    expect(info.isDirectory()).toBe(false);
+    expect(info.dev).toBe(7n);
+    expect(output.subarray(0, bytesRead).toString()).toBe('native handle bytes');
+    await file.close();
+    expect(closed).toEqual([412]);
+  });
+});
+
 it.skipIf(!path)(
   'does not follow a directory swapped for a symlink after classification',
   async () => {

@@ -2,7 +2,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -52,7 +51,7 @@ describe.skipIf(process.platform !== 'win32' || !native)(
       return fd;
     }
 
-    it('walks real directories with handle-backed identities and readable CRT descriptors', () => {
+    it('walks real directories with handle-backed identities and native reads', () => {
       const base = mkdtempSync(join(tmpdir(), 'tracemind-win-fs-'));
       const root = join(base, 'project');
       mkdirSync(join(root, 'src'), { recursive: true });
@@ -65,8 +64,20 @@ describe.skipIf(process.platform !== 'win32' || !native)(
           'src',
         ]);
         const sourceFd = openChild(openChild(rootFd, 'src', true), 'é.ts', false);
-        expect(readFileSync(sourceFd, 'utf8')).toBe('approved bytes');
+        const info = native!.stat!(sourceFd);
+        expect(info.file).toBe(true);
+        expect(info.directory).toBe(false);
+        expect(info.size).toBe(BigInt('approved bytes'.length));
+        expect(typeof info.ino).toBe('bigint');
+        expect(typeof info.mtimeNs).toBe('bigint');
+        const bytes = Buffer.alloc(Number(info.size));
+        const bytesRead = native!.read!(sourceFd, bytes, 0, bytes.length, 0);
+        expect(bytes.subarray(0, bytesRead).toString('utf8')).toBe('approved bytes');
         expect(native!.identity!(sourceFd)).toMatch(/^win32:[a-f0-9]{16}:[a-f0-9]{32}$/);
+        expect(() => native!.stat!(0)).toThrow('Unknown Windows project handle');
+        expect(() => native!.read!(0, Buffer.alloc(1), 0, 1, 0)).toThrow(
+          'Unknown Windows project handle'
+        );
       } finally {
         closeOpenHandles();
         rmSync(base, { recursive: true, force: true });

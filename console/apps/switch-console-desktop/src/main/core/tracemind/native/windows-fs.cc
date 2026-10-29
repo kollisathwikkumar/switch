@@ -204,6 +204,14 @@ static int register_owner(int fd, HANDLE *anchors, size_t count) {
   return 1;
 }
 
+static int has_registered_owner(int fd) {
+  AcquireSRWLockShared(&owners_lock);
+  HandleOwner *owner = owners;
+  while (owner && owner->fd != fd) owner = owner->next;
+  ReleaseSRWLockShared(&owners_lock);
+  return owner != NULL;
+}
+
 static int duplicate_parent_anchors(int parent_fd, HANDLE **anchors_out, size_t *count_out) {
   HANDLE parent_handle = get_handle(parent_fd);
   if (parent_handle == INVALID_HANDLE_VALUE) return 0;
@@ -472,7 +480,8 @@ static napi_value list_directory(napi_env env, napi_callback_info info) {
   saved = GetLastError();
   FindClose(find);
   if (complete && saved != ERROR_NO_MORE_FILES) return fail_windows(env, "Enumerate Windows directory", saved);
-  napi_create_object(env, &result);
+  if (napi_create_object(env, &result) != napi_ok)
+    return fail(env, "Unable to allocate Windows directory listing");
   napi_get_boolean(env, complete, &complete_value);
   napi_set_named_property(env, result, "names", names);
   napi_set_named_property(env, result, "complete", complete_value);
@@ -499,6 +508,90 @@ static napi_value file_identity(napi_env env, napi_callback_info info) {
     if (written != 2) return fail(env, "Windows file identity formatting failed");
   }
   napi_create_string_utf8(env, identity, NAPI_AUTO_LENGTH, &result);
+  return result;
+}
+
+static int set_bigint(napi_env env, napi_value object, const char *name, int64_t value) {
+  napi_value bigint;
+  return napi_create_bigint_int64(env, value, &bigint) == napi_ok &&
+      napi_set_named_property(env, object, name, bigint) == napi_ok;
+}
+
+static napi_value file_stat(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result, value;
+  int fd;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 1 || !get_fd(env, argv[0], &fd)) return fail(env, "Invalid Windows project handle");
+  if (!has_registered_owner(fd)) return fail(env, "Unknown Windows project handle");
+  HANDLE handle = get_handle(fd);
+  if (handle == INVALID_HANDLE_VALUE) return fail(env, "Invalid Windows project handle");
+
+  FILE_ID_INFO id;
+  FILE_BASIC_INFO basic;
+  FILE_STANDARD_INFO standard;
+  if (!GetFileInformationByHandleEx(handle, FileIdInfo, &id, sizeof(id)) ||
+      !GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic)) ||
+      !GetFileInformationByHandleEx(handle, FileStandardInfo, &standard, sizeof(standard)))
+    return fail_windows(env, "Read Windows project handle metadata", GetLastError());
+
+  if (napi_create_object(env, &result) != napi_ok)
+    return fail(env, "Unable to allocate Windows project handle metadata");
+  uint64_t words[2] = { 0, 0 };
+  for (size_t i = 0; i < sizeof(id.FileId.Identifier); i++)
+    words[i / 8] |= (uint64_t)id.FileId.Identifier[i] << ((i % 8) * 8);
+  if (napi_create_bigint_words(env, 0, 2, words, &value) != napi_ok ||
+      napi_set_named_property(env, result, "ino", value) != napi_ok ||
+      napi_create_bigint_uint64(env, id.VolumeSerialNumber, &value) != napi_ok ||
+      napi_set_named_property(env, result, "dev", value) != napi_ok ||
+      !set_bigint(env, result, "size", standard.EndOfFile.QuadPart))
+    return fail(env, "Unable to serialize Windows project handle metadata");
+
+  const int64_t windows_epoch_100ns = 116444736000000000LL;
+  const int64_t mtime_ns = (basic.LastWriteTime.QuadPart - windows_epoch_100ns) * 100LL;
+  const int64_t ctime_ns = (basic.ChangeTime.QuadPart - windows_epoch_100ns) * 100LL;
+  if (!set_bigint(env, result, "mtimeNs", mtime_ns) ||
+      !set_bigint(env, result, "ctimeNs", ctime_ns) ||
+      napi_get_boolean(env, !standard.Directory, &value) != napi_ok ||
+      napi_set_named_property(env, result, "file", value) != napi_ok ||
+      napi_get_boolean(env, standard.Directory, &value) != napi_ok ||
+      napi_set_named_property(env, result, "directory", value) != napi_ok)
+    return fail(env, "Unable to serialize Windows project handle metadata");
+  return result;
+}
+
+static napi_value read_file(napi_env env, napi_callback_info info) {
+  size_t argc = 5, buffer_length = 0;
+  napi_value argv[5], result;
+  int fd;
+  void *buffer = NULL;
+  uint32_t offset, length;
+  double requested_position;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 5 || !get_fd(env, argv[0], &fd) ||
+      napi_get_buffer_info(env, argv[1], &buffer, &buffer_length) != napi_ok ||
+      napi_get_value_uint32(env, argv[2], &offset) != napi_ok ||
+      napi_get_value_uint32(env, argv[3], &length) != napi_ok ||
+      napi_get_value_double(env, argv[4], &requested_position) != napi_ok ||
+      (size_t)offset > buffer_length || (size_t)length > buffer_length - (size_t)offset ||
+      !(requested_position >= 0.0 && requested_position <= 4294967295.0))
+    return fail(env, "Invalid Windows project handle read request");
+  uint64_t position = (uint64_t)requested_position;
+  if ((double)position != requested_position)
+    return fail(env, "Windows project handle read offset must be an integer");
+  if (!has_registered_owner(fd)) return fail(env, "Unknown Windows project handle");
+  HANDLE handle = get_handle(fd);
+  if (handle == INVALID_HANDLE_VALUE) return fail(env, "Invalid Windows project handle");
+
+  LARGE_INTEGER file_position;
+  file_position.QuadPart = (LONGLONG)position;
+  if (!SetFilePointerEx(handle, file_position, NULL, FILE_BEGIN))
+    return fail_windows(env, "Seek Windows project handle", GetLastError());
+  DWORD bytes_read = 0;
+  if (length && !ReadFile(handle, (char *)buffer + offset, (DWORD)length, &bytes_read, NULL))
+    return fail_windows(env, "Read Windows project handle", GetLastError());
+  if (napi_create_uint32(env, bytes_read, &result) != napi_ok)
+    return fail(env, "Unable to serialize Windows project handle read result");
   return result;
 }
 
@@ -537,6 +630,8 @@ static napi_value init(napi_env env, napi_value exports) {
     { "classify", NULL, classify_child, NULL, NULL, NULL, napi_default, NULL },
     { "list", NULL, list_directory, NULL, NULL, NULL, napi_default, NULL },
     { "identity", NULL, file_identity, NULL, NULL, NULL, napi_default, NULL },
+    { "stat", NULL, file_stat, NULL, NULL, NULL, napi_default, NULL },
+    { "read", NULL, read_file, NULL, NULL, NULL, napi_default, NULL },
     { "close", NULL, close_fd, NULL, NULL, NULL, napi_default, NULL },
   };
   napi_define_properties(env, exports, sizeof(properties) / sizeof(properties[0]), properties);
