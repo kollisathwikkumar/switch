@@ -5,7 +5,7 @@
       'sources': [],
       'msvs_settings': {
         'VCCLCompilerTool': {
-          'AdditionalOptions': [ '/std:c11' ],
+          'LanguageStandard_C': 'stdc11',
         },
       },
       'conditions': [
