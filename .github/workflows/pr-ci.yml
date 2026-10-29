@@ -42,7 +42,7 @@ on:
   pull_request:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, codex/tracemind-phase3-windows-native]
 
 # Cancel a PR's in-flight CI when a new commit is pushed to the same ref.
 #
