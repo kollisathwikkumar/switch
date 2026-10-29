@@ -138,7 +138,19 @@ it.skipIf(process.platform !== 'linux')(
       const killedByLimit =
         (result.status === 'crashed' && result.signal === 'SIGKILL') ||
         (result.status === 'spawn_error' && result.execution.targetHandoff === 'failed');
-      expect(deniedByLimit || killedByLimit).toBe(true);
+      expect(
+        deniedByLimit || killedByLimit,
+        `Memory-limit exceedance result: ${JSON.stringify({
+          status: result.status,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          terminationUnconfirmed: result.terminationUnconfirmed,
+          targetHandoff: result.execution.targetHandoff,
+          effectiveLimits: result.effectiveLimits,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        })}`
+      ).toBe(true);
       expect(result.stdout).toContain('allocation-started');
       expect(result.stdout).not.toContain('allocation-complete');
       expect(result.terminationUnconfirmed).toBe(false);
