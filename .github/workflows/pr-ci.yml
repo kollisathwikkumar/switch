@@ -359,7 +359,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     container:
       image: ubuntu:24.04
-      options: --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --cap-add=SYS_CHROOT --cap-add=SETUID --cap-add=SETGID --cgroupns=private
+      options: --privileged --cgroupns=private
     defaults:
       run:
         working-directory: console
