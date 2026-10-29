@@ -258,11 +258,13 @@ jobs:
 
       - name: Test delegated Linux cgroup v2 process and memory limits
         shell: bash
+        env:
+          TRACEMIND_REQUIRE_CGROUP: '1'
         run: |
           set -euo pipefail
           if ! grep -qw memory /sys/fs/cgroup/cgroup.subtree_control || ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
-            echo 'Runner has no pre-enabled memory/pids delegation; resource integration tests will report skipped.'
-            exit 0
+            echo '::error::UNSUPPORTED: runner has no delegated cgroup v2 memory/pids controllers.'
+            exit 1
           fi
           cgroup="/sys/fs/cgroup/tracemind-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cleanup() {
@@ -284,7 +286,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" "$cgroup"
           printf '+memory +pids\n' | sudo tee "$cgroup/cgroup.subtree_control" >/dev/null
           mkdir "$cgroup/worker"
-          bash -c 'echo "$BASHPID" > "$1/worker/cgroup.procs"; shift; exec "$@"' _ "$cgroup" \
+          bash -c 'set -e; pid=$BASHPID; printf "%s\n" "$pid" | sudo tee "$1/worker/cgroup.procs" >/dev/null; shift; exec "$@"' _ "$cgroup" \
             pnpm --filter @switch-console/desktop exec vitest run --project node \
             src/main/core/tracemind/verification/linux-cgroup-v2.test.ts \
             src/main/core/tracemind/verification/linux-cgroup-v2.integration.test.ts
