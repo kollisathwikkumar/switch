@@ -282,7 +282,7 @@ jobs:
           trap cleanup EXIT
           sudo mkdir "$cgroup"
           sudo chown "$(id -u):$(id -g)" "$cgroup"
-          printf '+memory +pids\n' > "$cgroup/cgroup.subtree_control"
+          printf '+memory +pids\n' | sudo tee "$cgroup/cgroup.subtree_control" >/dev/null
           mkdir "$cgroup/worker"
           bash -c 'echo "$BASHPID" > "$1/worker/cgroup.procs"; shift; exec "$@"' _ "$cgroup" \
             pnpm --filter @switch-console/desktop exec vitest run --project node \
