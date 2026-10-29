@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -61,6 +62,19 @@ it.skipIf(process.platform !== 'win32')(
         timeoutMs: 10_000,
         environment: {},
       });
+      // Run known executables outside MXC first. If these pass but the identical
+      // controls fail in ProcessContainer, the failure is in the native container
+      // launch path rather than the hosted Windows image or ARM64 Node runtime.
+      const directSystemControl = spawnSync(
+        join(systemRoot as string, 'System32', 'where.exe'),
+        ['cmd.exe'],
+        { encoding: 'utf8' }
+      );
+      const directNodeControl = spawnSync(
+        process.execPath,
+        ['-e', 'process.stdout.write(process.arch)'],
+        { encoding: 'utf8' }
+      );
       // Capture the native backend's request-specific capability report before
       // launch so an OS-level startup failure is distinguishable from a request
       // rejected by the installed ProcessContainer tier.
@@ -72,6 +86,20 @@ it.skipIf(process.platform !== 'win32')(
       const systemControl = await run(systemControlRequest, { telemetry: { enabled: false } });
       const result = await run(request, { telemetry: { enabled: false } });
       const diagnostic = JSON.stringify({
+        directHostControl: {
+          system: {
+            status: directSystemControl.status,
+            error: directSystemControl.error?.message ?? null,
+            stdout: directSystemControl.stdout,
+            stderr: directSystemControl.stderr,
+          },
+          node: {
+            status: directNodeControl.status,
+            error: directNodeControl.error?.message ?? null,
+            stdout: directNodeControl.stdout,
+            stderr: directNodeControl.stderr,
+          },
+        },
         systemControl: {
           exitCode: systemControl.exitCode,
           timedOut: systemControl.timedOut,
@@ -88,6 +116,10 @@ it.skipIf(process.platform !== 'win32')(
         },
         capability,
       });
+      expect(directSystemControl.status, diagnostic).toBe(0);
+      expect(directSystemControl.stdout.toLowerCase(), diagnostic).toContain('cmd.exe');
+      expect(directNodeControl.status, diagnostic).toBe(0);
+      expect(directNodeControl.stdout).toBe('arm64');
       expect(systemControl.exitCode, diagnostic).toBe(0);
       expect(systemControl.stdout.toLowerCase(), diagnostic).toContain('cmd.exe');
       expect(result.timedOut).toBe(false);

@@ -399,6 +399,31 @@ jobs:
           src/main/core/tracemind/verification/linux-bubblewrap-sandbox.test.ts
           src/main/core/tracemind/verification/linux-target-status.test.ts
 
+      - name: Record hosted cgroup v2 capabilities
+        run: |
+          set -eu
+          echo "UID=$(id -u) GID=$(id -g)"
+          echo "CGROUP_INFO=$(cat /proc/self/cgroup | tr '\n' ';')"
+          echo "CGROUP2_MOUNTS_BEGIN"
+          grep ' - cgroup2 ' /proc/self/mountinfo || true
+          echo "CGROUP2_MOUNTS_END"
+          current="$(awk -F: '$1 == "0" { print $3 }' /proc/self/cgroup)"
+          for path in /sys/fs/cgroup "/sys/fs/cgroup${current%/}"; do
+            [ -d "$path" ] || continue
+            echo "CGROUP_PATH=$path"
+            for name in cgroup.controllers cgroup.subtree_control cgroup.type memory.max pids.max memory.oom.group; do
+              file="$path/$name"
+              if [ -r "$file" ]; then
+                printf '%s=' "$name"
+                tr '\n' ' ' < "$file"
+                printf '\n'
+              else
+                echo "$name=<unreadable-or-absent>"
+              fi
+              if [ -w "$file" ]; then echo "${name}_writable=yes"; else echo "${name}_writable=no"; fi
+            done
+          done
+
       - name: Test required delegated cgroup v2 process and memory limits
         env:
           TRACEMIND_REQUIRE_CGROUP: '1'
