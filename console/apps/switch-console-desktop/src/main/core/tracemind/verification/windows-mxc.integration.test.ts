@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { run } from '@microsoft/mxc-sdk/v1';
+import { probe, run } from '@microsoft/mxc-sdk/v1';
 import { expect, it } from 'vitest';
 import { buildWindowsMxcRequest } from './windows-mxc';
 
@@ -61,6 +61,10 @@ it.skipIf(process.platform !== 'win32')(
         timeoutMs: 10_000,
         environment: {},
       });
+      // Capture the native backend's request-specific capability report before
+      // launch so an OS-level startup failure is distinguishable from a request
+      // rejected by the installed ProcessContainer tier.
+      const capability = probe(request);
       const result = await run(request, { telemetry: { enabled: false } });
       expect(result.timedOut).toBe(false);
       expect(
@@ -70,6 +74,7 @@ it.skipIf(process.platform !== 'win32')(
           stdout: result.stdout,
           stderr: result.stderr,
           warnings: result.warnings,
+          capability,
         })
       ).toBe(0);
       const resultLine = result.stdout
