@@ -1,4 +1,4 @@
-import { ArrowUpRight, BookOpen, FolderInput, Settings } from 'lucide-react';
+import { ArrowUpRight, BookOpen, FolderInput, Search, Settings } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import React from 'react';
 import { SidebarOnboardingChecklist } from '@renderer/features/onboarding/sidebar-onboarding-checklist';
@@ -87,6 +87,15 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
         <SidebarFooter>
           <SidebarMenu>
             <SidebarSearchTrigger />
+            <SidebarMenuButton
+              isActive={isCurrentView(currentView, 'tracemind')}
+              onClick={() => navigate('tracemind')}
+              aria-label="TraceMind"
+              className="w-full"
+            >
+              <Search className="h-5 w-5 sm:h-4 sm:w-4" />
+              TraceMind
+            </SidebarMenuButton>
             <SidebarMenuButton
               isActive={
                 isCurrentView(currentView, 'settings') || isCurrentView(currentView, 'remoteHost')

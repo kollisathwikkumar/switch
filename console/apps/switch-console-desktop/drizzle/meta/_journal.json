@@ -379,6 +379,34 @@
       "when": 1792510951310,
       "tag": "0053_agent_auto_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1793138862114,
+      "tag": "0054_minor_lifeguard",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1793138900465,
+      "tag": "0055_elite_daimon_hellstrom",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1793139003601,
+      "tag": "0056_rare_archangel",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1793139553709,
+      "tag": "0057_perfect_patch",
+      "breakpoints": true
     }
   ]
 }

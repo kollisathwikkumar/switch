@@ -209,7 +209,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 11.5.3
+          version: 10.28.2
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -251,8 +251,155 @@ jobs:
       - name: Typecheck (tsgo)
         run: pnpm -r run typecheck
 
+      # The Linux TraceMind isolation probe exercises bubblewrap's real
+      # read-only filesystem, network, and PID namespaces.
+      - name: Install bubblewrap for TraceMind isolation test
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Test delegated Linux cgroup v2 process and memory limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -qw memory /sys/fs/cgroup/cgroup.subtree_control || ! grep -qw pids /sys/fs/cgroup/cgroup.subtree_control; then
+            echo 'Runner has no pre-enabled memory/pids delegation; resource integration tests will report skipped.'
+            exit 0
+          fi
+          cgroup="/sys/fs/cgroup/tracemind-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            if [ -d "$cgroup" ]; then
+              for child in "$cgroup"/*; do
+                [ -d "$child" ] || continue
+                if [ -w "$child/cgroup.kill" ]; then printf '1\n' > "$child/cgroup.kill" || true; fi
+                for _ in $(seq 1 50); do
+                  grep -q '^populated 0$' "$child/cgroup.events" && break
+                  sleep 0.02
+                done
+                rmdir "$child" 2>/dev/null || true
+              done
+              rmdir "$cgroup" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          sudo mkdir "$cgroup"
+          sudo chown "$(id -u):$(id -g)" "$cgroup"
+          printf '+memory +pids\n' > "$cgroup/cgroup.subtree_control"
+          mkdir "$cgroup/worker"
+          bash -c 'echo "$BASHPID" > "$1/worker/cgroup.procs"; shift; exec "$@"' _ "$cgroup" \
+            pnpm --filter @switch-console/desktop exec vitest run --project node \
+            src/main/core/tracemind/verification/linux-cgroup-v2.test.ts \
+            src/main/core/tracemind/verification/linux-cgroup-v2.integration.test.ts
+
       - name: Test (vitest)
         run: pnpm -r run test
+
+  console-macos-isolation:
+    name: TraceMind sandbox (macOS)
+    needs: changes
+    if: ${{ needs.changes.outputs.console == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.28.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: console/.nvmrc
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/**' run build
+
+      - name: Test native macOS filesystem and network isolation
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/macos-sandbox.test.ts
+
+      - name: Test trusted per-process CPU cap on macOS
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/process-adapter.test.ts
+          -t 'trusted helper per-process CPU limit'
+
+      - name: Fail closed for unsupported macOS resource limits
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/resource-limit-fail-closed.test.ts
+
+      - name: Probe process-count and memory limit support on macOS
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/process-limit.test.ts
+          src/main/core/tracemind/verification/memory-limit.test.ts
+
+  # This lane reproduces Linux isolation on ARM64 rather than relying on the
+  # local Lima guest. Bubblewrap must be available, and the required cgroup
+  # tests fail explicitly when the hosted runner lacks delegated memory/pids.
+  console-linux-arm64-isolation:
+    name: TraceMind sandbox (Linux ARM64)
+    needs: changes
+    if: ${{ needs.changes.outputs.console == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.28.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: console/.nvmrc
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/**' run build
+
+      - name: Install Bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Assert hosted Linux ARM64 isolation prerequisites
+        run: |
+          test "$(uname -m)" = aarch64
+          bwrap --version
+          echo "LINUX_ARCH=$(uname -m)"
+          echo "BUBBLEWRAP=$(bwrap --version)"
+
+      - name: Test real Bubblewrap namespace isolation on ARM64
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/linux-bubblewrap-sandbox.test.ts
+          src/main/core/tracemind/verification/linux-target-status.test.ts
+
+      - name: Test required delegated cgroup v2 process and memory limits
+        env:
+          TRACEMIND_REQUIRE_CGROUP: '1'
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/linux-cgroup-v2.test.ts
+          src/main/core/tracemind/verification/linux-cgroup-v2.integration.test.ts
 
   # The agent runner and the controller on native Windows (CHOO-3472): process
   # control, CLI lookup and permissions there take different code paths, and
@@ -274,7 +421,7 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 11.5.3
+          version: 10.28.2
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -304,6 +451,67 @@ jobs:
       - name: Test Console's embedded controller and Windows launching
         if: ${{ !cancelled() }}
         run: pnpm --filter @switch-console/desktop exec vitest run --project node src/main/core/embedded-controller src/main/core/execution-context
+
+      - name: Test TraceMind process adapter on Windows
+        if: ${{ !cancelled() }}
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/verification/process-adapter.test.ts
+          src/main/core/tracemind/verification/command-contract.test.ts
+          src/main/core/tracemind/verification/approval-service.test.ts
+          src/main/core/tracemind/controller.test.ts
+          src/main/core/tracemind/verification/resource-limit-fail-closed.test.ts
+
+  console-windows-11-isolation:
+    name: TraceMind sandbox (Windows 11 ARM64)
+    needs: changes
+    if: ${{ needs.changes.outputs.console == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    # Pin the VS 2026 ARM64 image: `windows-11-arm` migrates with the hosted
+    # image rollout, while this label makes the ProcessContainer prerequisite
+    # deterministic for the real MXC isolation lane.
+    runs-on: windows-11-vs2026-arm
+    defaults:
+      run:
+        shell: bash
+        working-directory: console
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.28.2
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # MXC SDK 1.0.1 requires this Windows stdio-transfer floor; keep
+          # Linux/macOS on the repository pin, but use the supported 24.x here.
+          node-version: '24.21.0'
+          cache: pnpm
+          cache-dependency-path: console/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Assert Windows 11 ARM64 isolation prerequisites
+        run: |
+          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (process.platform !== 'win32' || process.arch !== 'arm64' || major !== 24 || minor < 21) process.exit(1); console.log('WINDOWS_PLATFORM=' + process.platform); console.log('WINDOWS_ARCH=' + process.arch); console.log('WINDOWS_NODE=' + process.versions.node)"
+
+      - name: Build workspace packages
+        run: pnpm -r --filter './packages/**' run build
+
+      - name: Exercise real Windows ProcessContainer write and loopback denial
+        env:
+          TRACEMIND_REQUIRE_WINDOWS: '1'
+        run: >-
+          pnpm --filter @switch-console/desktop exec vitest run --project node
+          src/main/core/tracemind/native/native-loader.test.ts
+          src/main/core/tracemind/native/windows-fs.integration.test.ts
+          src/main/core/tracemind/verification/windows-mxc.test.ts
+          src/main/core/tracemind/verification/windows-mxc.integration.test.ts
+          src/main/core/tracemind/verification/resource-limit-fail-closed.test.ts
 
   artifacts:
     name: Artifact registry

@@ -9,6 +9,7 @@
  */
 export const VIEW_IDS = [
   'home',
+  'tracemind',
   'location',
   'session',
   'chat',

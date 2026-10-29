@@ -18,9 +18,9 @@
   "main": "./out/main/index.js",
   "scripts": {
     "d": "pnpm install && pnpm run dev",
-    "dev": "electron-vite dev",
-    "dev:debug": "VITE_LOG_LEVEL=debug electron-vite dev",
-    "dev:main": "electron-vite dev --watch main",
+    "dev": "pnpm run build:tracemind-native && electron-vite dev",
+    "dev:debug": "pnpm run build:tracemind-native && VITE_LOG_LEVEL=debug electron-vite dev",
+    "dev:main": "pnpm run build:tracemind-native && electron-vite dev --watch main",
     "dev:renderer": "electron-vite dev --watch renderer",
     "db:generate": "drizzle-kit generate",
     "db:setup": "npm install --prefix tooling/node-deps",
@@ -28,8 +28,8 @@
     "test:migrations": "vitest run --project migrations",
     "db:reset": "rm -f \"$HOME/Library/Application Support/switchdash-dev/switchdash.db\" \"$HOME/Library/Application Support/switchdash-dev/switchdash.db-wal\" \"$HOME/Library/Application Support/switchdash-dev/switchdash.db-shm\" \"$HOME/.config/switchdash-dev/switchdash.db\" \"$HOME/.config/switchdash-dev/switchdash.db-wal\" \"$HOME/.config/switchdash-dev/switchdash.db-shm\"",
     "test": "vitest run --project node --project main-db --project migrations --project browser",
-    "build": "electron-vite build && pnpm run build:sidecar && pnpm run build:local-server",
-    "build:main": "electron-vite build --filter main",
+    "build": "pnpm run build:tracemind-native && electron-vite build && pnpm run build:sidecar && pnpm run build:local-server",
+    "build:main": "pnpm run build:tracemind-native && electron-vite build --filter main",
     "build:sidecar": "node scripts/build-sidecar.mjs",
     "build:local-server": "node scripts/build-local-server-bundle.mjs",
     "sync:compose": "node scripts/sync-standalone-compose.mjs",
@@ -41,7 +41,7 @@
     "package:linux": "pnpm run build && electron-builder --linux --x64 --publish never --config electron-builder.config.ts",
     "package:linux:arm64": "pnpm run build && electron-builder --linux --arm64 --publish never --config electron-builder.config.ts",
     "package:win": "pnpm run build && electron-builder --win --publish never --config electron-builder.config.ts",
-    "postinstall": "node --experimental-strip-types scripts/postinstall.ts",
+    "postinstall": "node --experimental-strip-types scripts/postinstall.ts && node scripts/build-tracemind-native.mjs",
     "rebuild": "electron-rebuild -f --only=better-sqlite3",
     "deeplink:reset": "node --experimental-strip-types scripts/reset-deeplink-handler.ts",
     "clean": "rm -rf node_modules dist",
@@ -51,7 +51,8 @@
     "format:check": "oxfmt --check",
     "typecheck": "tsgo --noEmit",
     "docs": "cd docs && pnpm run dev",
-    "docs:build": "cd docs && pnpm run build"
+    "docs:build": "cd docs && pnpm run build",
+    "build:tracemind-native": "node scripts/build-tracemind-native.mjs"
   },
   "dependencies": {
     "@parcel/watcher": "^2.5.6",
@@ -76,6 +77,7 @@
     "smol-toml": "^1.8.0",
     "ssh2": "^1.17.0",
     "tldts": "^7.4.2",
+    "typescript": "^6.0.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -85,6 +87,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^4.0.1",
+    "@microsoft/mxc-sdk": "1.0.1",
     "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tanstack/react-form": "^1.28.4",
@@ -126,6 +129,7 @@
     "mobx-react-lite": "^4.1.1",
     "monaco-editor": "^0.56.0",
     "motion": "^12.23.12",
+    "node-gyp": "12.4.0",
     "oxfmt": "^0.67.0",
     "oxlint": "^1.66.0",
     "oxlint-tsgolint": "^0.23.0",
@@ -147,7 +151,6 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss": "^4.2.1",
     "tw-animate-css": "^1.4.0",
-    "typescript": "^6.0.2",
     "vite": "^6.4.1",
     "vitest": "^5.0.1",
     "vitest-browser-react": "^2.3.0"

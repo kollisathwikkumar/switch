@@ -49,8 +49,10 @@ function Enter({
 export function WelcomePage({
   onContinue,
   onLeave,
+  onTraceMind,
 }: {
   onContinue: () => void;
+  onTraceMind: () => void;
   /** Back to the app, when the pages were opened again rather than on a fresh install. */
   onLeave: (() => void) | null;
 }) {
@@ -62,7 +64,12 @@ export function WelcomePage({
       enter={false}
       footer={
         <Enter order={7}>
-          <Button onClick={onContinue}>Get started</Button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button onClick={onContinue}>Get started</Button>
+            <Button variant="outline" onClick={onTraceMind}>
+              Open TraceMind locally
+            </Button>
+          </div>
         </Enter>
       }
     >

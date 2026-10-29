@@ -112,6 +112,7 @@ const config: Configuration = {
   // running them, so a running server never holds the app's own files.
   extraResources: [
     { from: 'dist-sidecar', to: 'dist-sidecar' },
+    { from: 'dist-tracemind-native', to: 'dist-tracemind-native' },
     { from: 'dist-local-server', to: 'local-server' },
   ],
   asarUnpack: ['node_modules/better-sqlite3/**', 'node_modules/@parcel/watcher/**', '**/*.node'],

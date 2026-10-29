@@ -25,6 +25,7 @@ import { appSettingsController } from './core/settings/controller';
 import { switchRoomsController } from './core/switch-rooms/controller';
 import { switchServersController } from './core/switch-servers/controller';
 import { telemetryController } from './core/telemetry/controller';
+import { tracemindController } from './core/tracemind/controller';
 import { updateController } from './core/updates/controller';
 import { userChangesController } from './core/user-changes/controller';
 import { viewStateController } from './core/view-state/controller';
@@ -54,6 +55,7 @@ export const rpcRouter = createRPCRouter({
   remoteHosts: remoteHostsController,
   roomTemplates: roomTemplatesController,
   telemetry: telemetryController,
+  tracemind: tracemindController,
   embeddedController: embeddedControllerController,
   agentMigration: agentMigrationController,
   hostControllers: hostControllersController,

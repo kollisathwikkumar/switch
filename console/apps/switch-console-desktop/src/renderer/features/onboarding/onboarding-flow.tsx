@@ -189,7 +189,9 @@ export const OnboardingFlow = observer(function OnboardingFlow() {
     <WizardChromeProvider chrome="page" exit={exit}>
       {/* Keyed by page, so each one opens afresh, with its entrance. */}
       <Fragment key={page}>
-        {currentPage(server, cloudChoice, goTo, back, finish, finishWithBuddy)}
+        {currentPage(server, cloudChoice, goTo, back, finish, finishWithBuddy, () =>
+          navigate('tracemind')
+        )}
       </Fragment>
     </WizardChromeProvider>
   );
@@ -240,7 +242,8 @@ function currentPage(
   finishWithBuddy: (
     serverId: string,
     agent: { agentId: string; name: string } | null
-  ) => Promise<void>
+  ) => Promise<void>,
+  openTraceMind: () => void
 ) {
   switch (onboardingStore.page) {
     case 'welcome':
@@ -249,6 +252,7 @@ function currentPage(
       return (
         <WelcomePage
           onContinue={() => goTo('howToRun')}
+          onTraceMind={openTraceMind}
           onLeave={onboardingStore.rehearsal ? () => finish(null) : null}
         />
       );

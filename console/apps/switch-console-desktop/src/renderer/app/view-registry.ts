@@ -20,6 +20,7 @@ import { serverView } from '@renderer/features/switch-servers/view';
 import { templateDetailView } from '@renderer/features/templates/template-detail-view';
 import { templateUseView } from '@renderer/features/templates/template-use-view';
 import { templatesView } from '@renderer/features/templates/templates-view';
+import { tracemindView } from '@renderer/features/tracemind/tracemind-view';
 import type { CommandProvider } from '@renderer/lib/commands/types';
 import { appState } from '@renderer/lib/stores/app-state';
 import type { ViewIdName } from '@shared/core/views/view-ids';
@@ -29,6 +30,7 @@ import type { ViewIdName } from '@shared/core/views/view-ids';
 // server's agents and rooms. Automations, library, skills, and mcp were removed.
 export const views = {
   home: homeView,
+  tracemind: tracemindView,
   location: locationView,
   session: sessionView,
   chat: chatView,

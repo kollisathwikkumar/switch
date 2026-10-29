@@ -1,5 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  foreignKey,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 import { versionedJsonColumn } from '@main/db/versioned-column';
 import { agentProviderConfig } from '@shared/core/agents/agent-provider-config';
 import type { AgentProviderId } from '@shared/core/providers/agent-provider-registry';
@@ -418,6 +426,196 @@ export const kv = sqliteTable(
   },
   (table) => ({
     keyIdx: uniqueIndex('idx_kv_key').on(table.key),
+  })
+);
+
+/** Revision header for TraceMind's normalized, revision-scoped evidence graph. */
+export const tracemindGraphRevisions = sqliteTable(
+  'tracemind_graph_revisions',
+  {
+    projectId: text('project_id').notNull(),
+    revision: text('revision').notNull(),
+    schemaVersion: integer('schema_version').notNull(),
+    capturedAt: integer('captured_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.revision] }),
+    capturedAtIdx: index('idx_tracemind_graph_revisions_captured_at').on(
+      table.projectId,
+      table.capturedAt
+    ),
+  })
+);
+
+/** Indexed node fields plus the validated versioned node payload. */
+export const tracemindGraphNodes = sqliteTable(
+  'tracemind_graph_nodes',
+  {
+    projectId: text('project_id').notNull(),
+    revision: text('revision').notNull(),
+    id: text('id').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    kind: text('kind').notNull(),
+    label: text('label').notNull(),
+    sourcePath: text('source_path'),
+    startLine: integer('start_line'),
+    endLine: integer('end_line'),
+    stale: integer('stale', { mode: 'boolean' }).notNull(),
+    payload: text('payload').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.revision, table.id] }),
+    revisionFk: foreignKey({
+      columns: [table.projectId, table.revision],
+      foreignColumns: [tracemindGraphRevisions.projectId, tracemindGraphRevisions.revision],
+      name: 'fk_tracemind_graph_nodes_revision',
+    }).onDelete('cascade'),
+    revisionIdx: index('idx_tracemind_graph_nodes_revision').on(table.projectId, table.revision),
+    sourceIdx: index('idx_tracemind_graph_nodes_source').on(
+      table.projectId,
+      table.revision,
+      table.sourcePath
+    ),
+    kindIdx: index('idx_tracemind_graph_nodes_kind').on(
+      table.projectId,
+      table.revision,
+      table.kind
+    ),
+  })
+);
+
+/** Indexed edge endpoints and source path plus validated relationship payload. */
+export const tracemindGraphRelationships = sqliteTable(
+  'tracemind_graph_relationships',
+  {
+    projectId: text('project_id').notNull(),
+    revision: text('revision').notNull(),
+    id: text('id').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    sourceId: text('source_id').notNull(),
+    targetId: text('target_id').notNull(),
+    relation: text('relation').notNull(),
+    sourcePath: text('source_path'),
+    stale: integer('stale', { mode: 'boolean' }).notNull(),
+    payload: text('payload').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.revision, table.id] }),
+    revisionFk: foreignKey({
+      columns: [table.projectId, table.revision],
+      foreignColumns: [tracemindGraphRevisions.projectId, tracemindGraphRevisions.revision],
+      name: 'fk_tracemind_graph_relationships_revision',
+    }).onDelete('cascade'),
+    sourceNodeFk: foreignKey({
+      columns: [table.projectId, table.revision, table.sourceId],
+      foreignColumns: [
+        tracemindGraphNodes.projectId,
+        tracemindGraphNodes.revision,
+        tracemindGraphNodes.id,
+      ],
+      name: 'fk_tracemind_graph_relationships_source_node',
+    }).onDelete('cascade'),
+    targetNodeFk: foreignKey({
+      columns: [table.projectId, table.revision, table.targetId],
+      foreignColumns: [
+        tracemindGraphNodes.projectId,
+        tracemindGraphNodes.revision,
+        tracemindGraphNodes.id,
+      ],
+      name: 'fk_tracemind_graph_relationships_target_node',
+    }).onDelete('cascade'),
+    revisionIdx: index('idx_tracemind_graph_relationships_revision').on(
+      table.projectId,
+      table.revision
+    ),
+    sourceIdx: index('idx_tracemind_graph_relationships_source').on(
+      table.projectId,
+      table.revision,
+      table.sourceId
+    ),
+    sourceOrderIdx: index('idx_tracemind_graph_relationships_source_order').on(
+      table.projectId,
+      table.revision,
+      table.sourceId,
+      table.ordinal
+    ),
+    targetIdx: index('idx_tracemind_graph_relationships_target').on(
+      table.projectId,
+      table.revision,
+      table.targetId
+    ),
+    pathIdx: index('idx_tracemind_graph_relationships_path').on(
+      table.projectId,
+      table.revision,
+      table.sourcePath
+    ),
+  })
+);
+
+export const tracemindGraphRetrievalReasons = sqliteTable(
+  'tracemind_graph_retrieval_reasons',
+  {
+    projectId: text('project_id').notNull(),
+    revision: text('revision').notNull(),
+    id: text('id').notNull(),
+    evidenceNodeId: text('evidence_node_id').notNull(),
+    reason: text('reason').notNull(),
+    retrievedAt: integer('retrieved_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.revision, table.id] }),
+    revisionFk: foreignKey({
+      columns: [table.projectId, table.revision],
+      foreignColumns: [tracemindGraphRevisions.projectId, tracemindGraphRevisions.revision],
+      name: 'fk_tracemind_graph_retrieval_reasons_revision',
+    }).onDelete('cascade'),
+    evidenceNodeFk: foreignKey({
+      columns: [table.projectId, table.revision, table.evidenceNodeId],
+      foreignColumns: [
+        tracemindGraphNodes.projectId,
+        tracemindGraphNodes.revision,
+        tracemindGraphNodes.id,
+      ],
+      name: 'fk_tracemind_graph_retrieval_reasons_evidence_node',
+    }).onDelete('cascade'),
+    revisionIdx: index('idx_tracemind_graph_retrieval_reasons_revision').on(
+      table.projectId,
+      table.revision
+    ),
+    evidenceIdx: index('idx_tracemind_graph_retrieval_reasons_evidence').on(
+      table.projectId,
+      table.revision,
+      table.evidenceNodeId
+    ),
+  })
+);
+
+export const tracemindGraphParserFailures = sqliteTable(
+  'tracemind_graph_parser_failures',
+  {
+    projectId: text('project_id').notNull(),
+    revision: text('revision').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    path: text('path').notNull(),
+    language: text('language').notNull(),
+    message: text('message').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.revision, table.ordinal] }),
+    revisionFk: foreignKey({
+      columns: [table.projectId, table.revision],
+      foreignColumns: [tracemindGraphRevisions.projectId, tracemindGraphRevisions.revision],
+      name: 'fk_tracemind_graph_parser_failures_revision',
+    }).onDelete('cascade'),
+    revisionIdx: index('idx_tracemind_graph_parser_failures_revision').on(
+      table.projectId,
+      table.revision
+    ),
+    pathIdx: index('idx_tracemind_graph_parser_failures_path').on(
+      table.projectId,
+      table.revision,
+      table.path
+    ),
   })
 );
 

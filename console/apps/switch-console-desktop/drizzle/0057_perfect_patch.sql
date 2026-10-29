@@ -1,0 +1,1 @@
+CREATE INDEX `idx_tracemind_graph_relationships_source_order` ON `tracemind_graph_relationships` (`project_id`,`revision`,`source_id`,`ordinal`);
