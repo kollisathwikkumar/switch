@@ -29,83 +29,38 @@ function command(script: string): ProcessInput {
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 describe('controlled process adapter on local temporary fixtures', () => {
   it.skipIf(process.platform !== 'win32')(
-    'keeps Windows fallback runs incomplete and unverified when no sandbox is available',
+    'requires a validated approved-root handoff before launching a Windows target',
     async () => {
       expect(detectSandboxMode()).toBe('unavailable');
-      const result = await new ProcessAdapter().run({
-        ...command('process.exit(0)'),
-        sandboxMode: 'unavailable',
-      });
-      expect(result).toMatchObject({
-        status: 'exited',
-        sandboxMode: 'unavailable',
-        terminationUnconfirmed: true,
-        capturedComplete: false,
-        effectiveLimits: { processCount: false, memory: false },
-      });
-      expect(
-        canVerifyRun({
-          state: 'exited',
-          exitCode: result.exitCode,
-          signal: result.signal,
-          stdoutTruncated: result.stdoutTruncated,
-          stderrTruncated: result.stderrTruncated,
-          isolation: result.sandboxMode,
-          approved: true,
-          capturedComplete: result.capturedComplete,
-          executionMatchesProposal: true,
-          terminationUnconfirmed: result.terminationUnconfirmed,
+      const marker = join(dir, 'windows-target-must-not-start');
+      await expect(
+        new ProcessAdapter().run({
+          ...command(`require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started')`),
+          sandboxMode: 'unavailable',
         })
-      ).toBe(false);
+      ).rejects.toThrow('Validated Windows approved-root handoff required');
+      await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     }
   );
   it.skipIf(process.platform !== 'win32')(
-    'records Windows timeouts and user cancellation as distinct incomplete outcomes',
+    'does not let timeout or cancellation bypass the Windows pre-spawn handoff gate',
     async () => {
-      const timedOut = await new ProcessAdapter().run({
-        ...command("process.stdout.write('timeout-started'); setTimeout(() => {}, 10000)"),
-        timeoutMs: 500,
-        sandboxMode: 'unavailable',
-      });
+      const marker = join(dir, 'windows-cancelled-target-must-not-start');
+      const adapter = new ProcessAdapter();
+      const target = `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started')`;
+      await expect(
+        adapter.run({ ...command(target), timeoutMs: 500, sandboxMode: 'unavailable' })
+      ).rejects.toThrow('Validated Windows approved-root handoff required');
       const cancellation = new AbortController();
-      const pendingCancellation = new ProcessAdapter().run({
-        ...command("process.stdout.write('cancel-started'); setTimeout(() => {}, 10000)"),
-        timeoutMs: 5000,
-        sandboxMode: 'unavailable',
-        signal: cancellation.signal,
-      });
-      await new Promise((resolve) => setTimeout(resolve, 150));
       cancellation.abort();
-      const cancelled = await pendingCancellation;
-
-      expect(timedOut).toMatchObject({
-        status: 'timed_out',
-        sandboxMode: 'unavailable',
-        capturedComplete: false,
-        terminationUnconfirmed: true,
-      });
-      expect(cancelled).toMatchObject({
-        status: 'cancelled',
-        sandboxMode: 'unavailable',
-        capturedComplete: false,
-        terminationUnconfirmed: true,
-      });
-      for (const result of [timedOut, cancelled]) {
-        expect(
-          canVerifyRun({
-            state: result.status === 'timed_out' ? 'timed_out' : 'cancelled',
-            exitCode: result.exitCode,
-            signal: result.signal,
-            stdoutTruncated: result.stdoutTruncated,
-            stderrTruncated: result.stderrTruncated,
-            isolation: result.sandboxMode,
-            approved: true,
-            capturedComplete: result.capturedComplete,
-            executionMatchesProposal: true,
-            terminationUnconfirmed: result.terminationUnconfirmed,
-          })
-        ).toBe(false);
-      }
+      await expect(
+        adapter.run({
+          ...command(target),
+          sandboxMode: 'unavailable',
+          signal: cancellation.signal,
+        })
+      ).rejects.toThrow('Validated Windows approved-root handoff required');
+      await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     }
   );
   it.skipIf(process.platform === 'win32')(
@@ -399,14 +354,14 @@ describe('controlled process adapter on local temporary fixtures', () => {
     }
   );
   it.skipIf(process.platform !== 'win32')(
-    'rejects descriptor-bound execution on Windows before starting a process',
+    'requires the Windows approved-root handoff before descriptor-bound execution',
     async () => {
       await expect(
         new ProcessAdapter().run({
           ...command("process.stdout.write('must not start')"),
           pinnedCwd: { fd: 0, identity: '1:2', helperExecutable: process.execPath },
         })
-      ).rejects.toThrow('Descriptor-bound execution unavailable');
+      ).rejects.toThrow('Validated Windows approved-root handoff required');
     }
   );
   it.skipIf(process.platform === 'win32')(
@@ -496,113 +451,132 @@ describe('controlled process adapter on local temporary fixtures', () => {
       }
     }
   );
-  it('captures actual exit, separate output and hashes without inheriting environment', async () => {
-    vi.stubEnv('TRACEMIND_TEST_SECRET', 'should-not-reach-child');
-    const result = await new ProcessAdapter().run(
-      command(
-        "process.stdout.write(String(process.env.TRACEMIND_TEST_SECRET ?? 'absent'));process.stderr.write('error');process.exitCode=7"
-      )
-    );
-    expect(result).toMatchObject({
-      status: 'exited',
-      exitCode: 7,
-      stdout: 'absent',
-      stderr: 'error',
-      stdoutHash: hash('absent'),
-      stderrHash: hash('error'),
-      capturedComplete: false,
-      terminationUnconfirmed: true,
-      sandboxMode: 'unavailable',
-      execution: {
-        executable: process.execPath,
-        args: ['-e', expect.any(String)],
-        cwd: dir,
-        environmentKeys: [],
-        timeoutMs: 5000,
-        outputBytes: 1000,
-        spawned: true,
-      },
-    });
-  });
-  it('marks timeout and output limits as incomplete, not passing', async () => {
-    const runner = new ProcessAdapter();
-    expect(
-      await runner.run({ ...command('setInterval(() => {},1000)'), timeoutMs: 150 })
-    ).toMatchObject({ status: 'timed_out', capturedComplete: false, terminationUnconfirmed: true });
-    await expect(runner.run(command('process.exit(0)'))).rejects.toThrow('unavailable');
-    expect(
-      await new ProcessAdapter().run({
-        ...command("process.stdout.write('x'.repeat(10000))"),
-        outputBytes: 64,
-      })
-    ).toMatchObject({ status: 'output_limit', stdoutTruncated: true, capturedComplete: false });
-  });
-  it('honors cancellation and rejects a second simultaneous run', async () => {
-    const runner = new ProcessAdapter();
-    const controller = new AbortController();
-    const first = runner.run({
-      ...command('setInterval(() => {},1000)'),
-      signal: controller.signal,
-    });
-    await expect(runner.run(command('process.exit(0)'))).rejects.toThrow('already running');
-    controller.abort();
-    expect(await first).toMatchObject({ status: 'cancelled', capturedComplete: false });
-  });
-  it('distinguishes pre-cancellation, signal crashes and spawn errors', async () => {
-    const runner = new ProcessAdapter();
-    const controller = new AbortController();
-    controller.abort();
-    expect(
-      await runner.run({ ...command('process.exit(0)'), signal: controller.signal })
-    ).toMatchObject({
-      status: 'cancelled',
-      exitCode: null,
-      capturedComplete: false,
-      execution: { spawned: false },
-    });
-    if (process.platform !== 'win32') {
-      expect(await runner.run(command("process.kill(process.pid, 'SIGTERM')"))).toMatchObject({
-        status: 'crashed',
-        signal: 'SIGTERM',
+  it.skipIf(process.platform === 'win32')(
+    'captures actual exit, separate output and hashes without inheriting environment',
+    async () => {
+      vi.stubEnv('TRACEMIND_TEST_SECRET', 'should-not-reach-child');
+      const result = await new ProcessAdapter().run(
+        command(
+          "process.stdout.write(String(process.env.TRACEMIND_TEST_SECRET ?? 'absent'));process.stderr.write('error');process.exitCode=7"
+        )
+      );
+      expect(result).toMatchObject({
+        status: 'exited',
+        exitCode: 7,
+        stdout: 'absent',
+        stderr: 'error',
+        stdoutHash: hash('absent'),
+        stderrHash: hash('error'),
         capturedComplete: false,
+        terminationUnconfirmed: true,
+        sandboxMode: 'unavailable',
+        execution: {
+          executable: process.execPath,
+          args: ['-e', expect.any(String)],
+          cwd: dir,
+          environmentKeys: [],
+          timeoutMs: 5000,
+          outputBytes: 1000,
+          spawned: true,
+        },
       });
     }
-    expect(
-      await new ProcessAdapter().run({ ...command(''), executable: join(dir, 'nonexistent') })
-    ).toMatchObject({
-      status: 'spawn_error',
-      exitCode: null,
-      capturedComplete: false,
-      execution: { spawned: false },
-    });
-    expect(await new ProcessAdapter().run(command('process.exit(0)'))).toMatchObject({
-      status: 'exited',
-      exitCode: 0,
-      capturedComplete: false,
-      terminationUnconfirmed: true,
-    });
-  });
-  it('rejects invalid commands, resource limits, and environment keys before spawning', async () => {
-    const runner = new ProcessAdapter();
-    await expect(runner.run({ ...command(''), executable: 'node' })).rejects.toThrow();
-    await expect(runner.run({ ...command(''), outputBytes: 0 })).rejects.toThrow();
-    await expect(runner.run({ ...command(''), cpuTimeSeconds: 0 })).rejects.toThrow();
-    await expect(runner.run({ ...command(''), env: { HOME: '/tmp' } })).rejects.toThrow();
-    const allowed = await runner.run({
-      ...command("process.stdout.write(process.env.CI || '')"),
-      env: { CI: '1' },
-    });
-    expect(allowed).toMatchObject({
-      status: 'exited',
-      stdout: '1',
-      execution: { environmentKeys: ['CI'], spawned: true },
-      effectiveLimits: {
-        timeout: 'termination-request',
-        concurrency: 'per-instance',
-        cpuTimeSeconds: false,
-        processCount: false,
-        memory: false,
-      },
-    });
-  });
+  );
+  it.skipIf(process.platform === 'win32')(
+    'marks timeout and output limits as incomplete, not passing',
+    async () => {
+      const runner = new ProcessAdapter();
+      expect(
+        await runner.run({ ...command('setInterval(() => {},1000)'), timeoutMs: 150 })
+      ).toMatchObject({
+        status: 'timed_out',
+        capturedComplete: false,
+        terminationUnconfirmed: true,
+      });
+      await expect(runner.run(command('process.exit(0)'))).rejects.toThrow('unavailable');
+      expect(
+        await new ProcessAdapter().run({
+          ...command("process.stdout.write('x'.repeat(10000))"),
+          outputBytes: 64,
+        })
+      ).toMatchObject({ status: 'output_limit', stdoutTruncated: true, capturedComplete: false });
+    }
+  );
+  it.skipIf(process.platform === 'win32')(
+    'honors cancellation and rejects a second simultaneous run',
+    async () => {
+      const runner = new ProcessAdapter();
+      const controller = new AbortController();
+      const first = runner.run({
+        ...command('setInterval(() => {},1000)'),
+        signal: controller.signal,
+      });
+      await expect(runner.run(command('process.exit(0)'))).rejects.toThrow('already running');
+      controller.abort();
+      expect(await first).toMatchObject({ status: 'cancelled', capturedComplete: false });
+    }
+  );
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes pre-cancellation, signal crashes and spawn errors',
+    async () => {
+      const runner = new ProcessAdapter();
+      const controller = new AbortController();
+      controller.abort();
+      expect(
+        await runner.run({ ...command('process.exit(0)'), signal: controller.signal })
+      ).toMatchObject({
+        status: 'cancelled',
+        exitCode: null,
+        capturedComplete: false,
+        execution: { spawned: false },
+      });
+      if (process.platform !== 'win32') {
+        expect(await runner.run(command("process.kill(process.pid, 'SIGTERM')"))).toMatchObject({
+          status: 'crashed',
+          signal: 'SIGTERM',
+          capturedComplete: false,
+        });
+      }
+      expect(
+        await new ProcessAdapter().run({ ...command(''), executable: join(dir, 'nonexistent') })
+      ).toMatchObject({
+        status: 'spawn_error',
+        exitCode: null,
+        capturedComplete: false,
+        execution: { spawned: false },
+      });
+      expect(await new ProcessAdapter().run(command('process.exit(0)'))).toMatchObject({
+        status: 'exited',
+        exitCode: 0,
+        capturedComplete: false,
+        terminationUnconfirmed: true,
+      });
+    }
+  );
+  it.skipIf(process.platform === 'win32')(
+    'rejects invalid commands, resource limits, and environment keys before spawning',
+    async () => {
+      const runner = new ProcessAdapter();
+      await expect(runner.run({ ...command(''), executable: 'node' })).rejects.toThrow();
+      await expect(runner.run({ ...command(''), outputBytes: 0 })).rejects.toThrow();
+      await expect(runner.run({ ...command(''), cpuTimeSeconds: 0 })).rejects.toThrow();
+      await expect(runner.run({ ...command(''), env: { HOME: '/tmp' } })).rejects.toThrow();
+      const allowed = await runner.run({
+        ...command("process.stdout.write(process.env.CI || '')"),
+        env: { CI: '1' },
+      });
+      expect(allowed).toMatchObject({
+        status: 'exited',
+        stdout: '1',
+        execution: { environmentKeys: ['CI'], spawned: true },
+        effectiveLimits: {
+          timeout: 'termination-request',
+          concurrency: 'per-instance',
+          cpuTimeSeconds: false,
+          processCount: false,
+          memory: false,
+        },
+      });
+    }
+  );
 });
