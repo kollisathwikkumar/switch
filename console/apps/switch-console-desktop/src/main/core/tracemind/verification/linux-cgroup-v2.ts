@@ -185,15 +185,20 @@ export async function prepareLinuxCgroupLimits(
       return null;
     }
     await writeControl(posix.join(groupPath, 'memory.max'), String(limits.memoryBytes));
+    // The request is a hard memory cap, not a RAM-only cap that can be bypassed
+    // by moving anonymous pages to unlimited swap.
+    await writeControl(posix.join(groupPath, 'memory.swap.max'), '0');
     await writeControl(posix.join(groupPath, 'pids.max'), String(limits.processCount));
     await writeControl(posix.join(groupPath, 'memory.oom.group'), '1');
-    const [memoryMax, pidsMax, oomGroup] = await Promise.all([
+    const [memoryMax, memorySwapMax, pidsMax, oomGroup] = await Promise.all([
       readFile(posix.join(groupPath, 'memory.max'), 'utf8'),
+      readFile(posix.join(groupPath, 'memory.swap.max'), 'utf8'),
       readFile(posix.join(groupPath, 'pids.max'), 'utf8'),
       readFile(posix.join(groupPath, 'memory.oom.group'), 'utf8'),
     ]);
     if (
       memoryMax.trim() !== String(limits.memoryBytes) ||
+      memorySwapMax.trim() !== '0' ||
       pidsMax.trim() !== String(limits.processCount) ||
       oomGroup.trim() !== '1'
     ) {
